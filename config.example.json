@@ -1,0 +1,27 @@
+{
+  "servers": {
+    "github": {
+      "description": "GitHub repositories, issues, pull requests and code search",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "REPLACE_ME"
+      }
+    },
+    "fetch": {
+      "description": "Fetch a URL and convert it to markdown",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "remote-example": {
+      "description": "An example streamable-HTTP MCP server",
+      "transport": "http",
+      "url": "http://localhost:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer REPLACE_ME"
+      }
+    }
+  }
+}

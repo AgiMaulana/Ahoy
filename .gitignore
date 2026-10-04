@@ -1,0 +1,13 @@
+# Compiled binaries
+/mcpgateway
+/downstream-demo
+*.exe
+
+# Local config may contain secrets
+/config.json
+
+# Agent/tooling state
+/.commandcode/
+
+# Scratch notes
+/me: I hate when the MCP server tools lis.md
