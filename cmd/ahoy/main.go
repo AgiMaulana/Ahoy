@@ -18,6 +18,10 @@ import (
 	"github.com/AgiMaulana/Ahoy/internal/mcpserver"
 )
 
+// version is the release version, stamped at build time with
+// -ldflags "-X main.version=<tag>" (see .github/workflows/release.yml).
+var version = "dev"
+
 const usage = `Ahoy — one MCP server in front of many.
 
 Usage:
@@ -27,6 +31,7 @@ Usage:
   ahoy login <name> [-config path]         authenticate an OAuth server
   ahoy list [-config path]                 list configured servers
   ahoy remove <name> [-config path]        remove a server
+  ahoy version                             print the version
 
 Use "ahoy add -h", "ahoy login -h", "ahoy list -h" or "ahoy remove -h" for command flags.`
 
@@ -39,6 +44,9 @@ func main() {
 		switch args[0] {
 		case "help", "-h", "--help":
 			fmt.Fprintln(os.Stderr, usage)
+			return
+		case "version", "-version", "--version":
+			fmt.Fprintln(os.Stderr, version)
 			return
 		case "serve", "run":
 			serve(args[1:])

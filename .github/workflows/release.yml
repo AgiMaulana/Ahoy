@@ -1,0 +1,147 @@
+name: Release
+
+# Triggers when a vX.Y.Z tag is created (e.g. when publishing a GitHub
+# release that creates the tag).
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+  # Required for keyless Sigstore signing (Fulcio certificate via GitHub OIDC)
+  id-token: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      # fetch-depth: 0 gives the full commit history, needed to auto-generate
+      # release notes from commits
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Extract X.Y.Z from the vX.Y.Z tag name
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Tag: ${GITHUB_REF_NAME}, version: ${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+          go build -trimpath -ldflags "-s -w -X main.version=${{ steps.version.outputs.version }}" \
+            -o "dist/ahoy-${GOOS}-${GOARCH}${EXT}" ./cmd/ahoy
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ahoy-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+
+  release:
+    name: Sign and create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 is required by git-cliff to walk the full history
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum * > checksums.txt
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Generate release notes from the commits of the latest tag using
+      # git-cliff (Conventional Commits aware). No cliff.toml -> default config.
+      - name: Generate release notes from commits
+        id: git-cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: -vv --latest --strip header
+        env:
+          OUTPUT: CHANGES.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      # Keyless signing: no key to manage. Each artifact gets a .sig (detached
+      # signature) and .pem (Fulcio certificate) next to it.
+      # Users verify with:
+      #   cosign verify-blob \
+      #     --signature <file>.sig --certificate <file>.pem \
+      #     --certificate-identity-regexp \
+      #       "^https://github.com/<owner>/<repo>/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$" \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      #     <file>
+      - name: Sign artifacts with cosign (keyless)
+        working-directory: dist
+        run: |
+          for f in *; do
+            case "$f" in *.sig|*.pem) continue ;; esac
+            echo "Signing $f"
+            cosign sign-blob --yes \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.pem" \
+              "$f"
+            echo "Verifying $f"
+            cosign verify-blob \
+              --signature "${f}.sig" \
+              --certificate "${f}.pem" \
+              --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$f"
+          done
+
+      # Idempotent: on a fresh tag this creates the release; on a re-run
+      # (re-pushed tag) it just re-uploads the assets, keeping existing notes.
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists — uploading assets"
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/* \
+              --title "Ahoy ${GITHUB_REF_NAME}" \
+              --notes-file CHANGES.md
+          fi

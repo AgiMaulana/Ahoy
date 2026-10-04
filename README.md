@@ -121,6 +121,22 @@ scopes, and `-port` if the default callback port is taken. A server configured
 with `auth: oauth` that has not been logged into reports
 `run "ahoy login <name>"` when the gateway starts.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AgiMaulana/Ahoy/main/install.sh | sh
+```
+
+The installer downloads the release binary for your platform, verifies its
+[cosign](https://github.com/sigstore/cosign) keyless signature (when `cosign` is
+on `PATH`), and installs `ahoy` to `/usr/local/bin`. Pin a version or choose a
+different directory:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AgiMaulana/Ahoy/main/install.sh | sh -s -- v0.1.0
+AHOY_INSTALL_DIR="$HOME/.local/bin" sh install.sh
+```
+
 ## Build & run
 
 ```sh
