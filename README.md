@@ -66,6 +66,12 @@ JSON file (`-config`, default `config.json`):
       "transport": "http",
       "url": "http://localhost:8080/mcp",
       "headers": { "Authorization": "Bearer REPLACE_ME" }
+    },
+    "sentry": {
+      "description": "Sentry issues and projects (browser OAuth login)",
+      "transport": "http",
+      "url": "https://mcp.sentry.dev/mcp",
+      "auth": "oauth"
     }
   }
 }
@@ -75,6 +81,45 @@ JSON file (`-config`, default `config.json`):
   (needs `url`, optional `headers`).
 - `description` is shown by `discover()`; keep it to one line.
 - `env` is appended to the inherited environment, so `PATH` etc. still work.
+- `auth`: `oauth` for an HTTP server that authenticates with a browser login.
+  Run `ahoy login <name>` once; the token is cached under `~/.ahoy/tokens` (or
+  `$AHOY_HOME`) and reused by the gateway afterwards.
+
+## Managing servers
+
+The same config can be edited from the terminal:
+
+```sh
+# streamable HTTP — the name is derived from the host ("sentry")
+ahoy add https://mcp.sentry.dev/mcp
+
+# ...with a static token
+ahoy add https://mcp.sentry.dev/mcp -header "Authorization: Bearer $TOKEN"
+
+# ...or with a browser OAuth login (run this once to authorize)
+ahoy add https://mcp.sentry.dev/mcp -auth oauth
+ahoy login sentry
+
+# stdio — NAME -- <command> [args]
+ahoy add github -- npx -y @modelcontextprotocol/server-github
+ahoy add github -env GITHUB_PERSONAL_ACCESS_TOKEN=$TOKEN -force \
+  -- npx -y @modelcontextprotocol/server-github
+
+ahoy list
+ahoy remove github
+```
+
+`add` connects to the server and prints its tool count *before* saving, so a
+broken entry is never committed. Pass `-no-verify` to save a server that is not
+reachable at add time. `-name` overrides the derived name; every command accepts
+`-config` (default `config.json`).
+
+`login` runs the standard OAuth 2.1 flow — metadata discovery, dynamic client
+registration, PKCE, and a localhost callback — then saves the token. Use
+`-client-id`/`-client-secret` for a pre-registered client, `-scope` to request
+scopes, and `-port` if the default callback port is taken. A server configured
+with `auth: oauth` that has not been logged into reports
+`run "ahoy login <name>"` when the gateway starts.
 
 ## Build & run
 

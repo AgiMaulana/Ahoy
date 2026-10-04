@@ -22,6 +22,12 @@
       "headers": {
         "Authorization": "Bearer REPLACE_ME"
       }
+    },
+    "sentry": {
+      "description": "Sentry issues and projects (browser OAuth; run: ahoy login sentry)",
+      "transport": "http",
+      "url": "https://mcp.sentry.dev/mcp",
+      "auth": "oauth"
     }
   }
 }

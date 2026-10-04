@@ -19,6 +19,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/AgiMaulana/Ahoy/internal/config"
+	"github.com/AgiMaulana/Ahoy/internal/oauthstore"
 )
 
 const (
@@ -65,6 +66,7 @@ func (s *Server) connectLocked(ctx context.Context) error {
 
 	if err := c.Start(ctx); err != nil {
 		_ = c.Close()
+		err = s.authHint(err)
 		s.lastErr = err
 		return err
 	}
@@ -74,6 +76,7 @@ func (s *Server) connectLocked(ctx context.Context) error {
 	initReq.Params.ClientInfo = mcp.Implementation{Name: clientName, Version: clientVersion}
 	if _, err := c.Initialize(ctx, initReq); err != nil {
 		_ = c.Close()
+		err = s.authHint(err)
 		s.lastErr = err
 		return err
 	}
@@ -100,10 +103,32 @@ func (s *Server) dial() (*client.Client, error) {
 		if len(s.Config.Headers) > 0 {
 			opts = append(opts, transport.WithHTTPHeaders(s.Config.Headers))
 		}
+		if s.Config.Auth == config.AuthOAuth {
+			store, err := oauthstore.New(s.Name)
+			if err != nil {
+				return nil, err
+			}
+			id, secret := store.ClientCredentials()
+			opts = append(opts, transport.WithHTTPOAuth(transport.OAuthConfig{
+				ClientID:     id,
+				ClientSecret: secret,
+				PKCEEnabled:  true,
+				TokenStore:   store,
+			}))
+		}
 		return client.NewStreamableHttpClient(s.Config.URL, opts...)
 	default:
 		return nil, fmt.Errorf("unsupported transport %q", s.Config.Transport)
 	}
+}
+
+// authHint points at "ahoy login" when an OAuth-configured server rejects the
+// connection because no usable token exists yet.
+func (s *Server) authHint(err error) error {
+	if err != nil && s.Config.Auth == config.AuthOAuth && client.IsOAuthAuthorizationRequiredError(err) {
+		return fmt.Errorf("%w — run \"ahoy login %s\"", err, s.Name)
+	}
+	return err
 }
 
 func envSlice(env map[string]string) []string {

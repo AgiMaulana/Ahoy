@@ -1,13 +1,15 @@
 // Command ahoy runs Ahoy over stdio. It connects to the downstream MCP
 // servers in its config and exposes only "discover" and "invoke" to the
-// agent.
+// agent. The add, list and remove subcommands edit that config file.
 package main
 
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/server"
 
@@ -16,17 +18,64 @@ import (
 	"github.com/AgiMaulana/Ahoy/internal/mcpserver"
 )
 
-func main() {
-	configPath := flag.String("config", "config.json", "path to the gateway config file")
-	flag.Parse()
+const usage = `Ahoy — one MCP server in front of many.
 
-	// stdout is the MCP stdio channel: all diagnostics must go to stderr.
-	log.SetOutput(os.Stderr)
+Usage:
+  ahoy [serve] [-config path]              run the gateway over stdio (default)
+  ahoy add <url> [flags]                   add a streamable-HTTP server
+  ahoy add <name> [flags] -- <cmd> [args]  add a stdio server
+  ahoy login <name> [-config path]         authenticate an OAuth server
+  ahoy list [-config path]                 list configured servers
+  ahoy remove <name> [-config path]        remove a server
+
+Use "ahoy add -h", "ahoy login -h", "ahoy list -h" or "ahoy remove -h" for command flags.`
+
+func main() {
+	log.SetOutput(os.Stderr) // stdout is reserved for the MCP stdio channel.
 	log.SetPrefix("ahoy: ")
+
+	args := os.Args[1:]
+	if len(args) > 0 {
+		switch args[0] {
+		case "help", "-h", "--help":
+			fmt.Fprintln(os.Stderr, usage)
+			return
+		case "serve", "run":
+			serve(args[1:])
+			return
+		case "add":
+			add(args[1:])
+			return
+		case "login", "auth":
+			login(args[1:])
+			return
+		case "list", "ls":
+			list(args[1:])
+			return
+		case "remove", "rm":
+			remove(args[1:])
+			return
+		}
+		// An unknown bare word is a typo; a leading "-" is the serve flags.
+		if !strings.HasPrefix(args[0], "-") {
+			fmt.Fprintf(os.Stderr, "ahoy: unknown command %q\n\n%s\n", args[0], usage)
+			os.Exit(2)
+		}
+	}
+	serve(args)
+}
+
+func serve(args []string) {
+	fs := flag.NewFlagSet("ahoy", flag.ExitOnError)
+	configPath := fs.String("config", "config.json", "path to the gateway config file")
+	_ = fs.Parse(args)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
+	}
+	if len(cfg.Servers) == 0 {
+		log.Fatalf("no servers defined in %s", *configPath)
 	}
 
 	gw := gateway.New(cfg)
