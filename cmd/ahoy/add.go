@@ -28,7 +28,7 @@ Flags:
   -env KEY=VALUE        environment variable, repeatable (stdio only)
   -force                overwrite an existing server with the same name
   -no-verify            save without checking the connection first
-  -config string        path to the config file (default "config.json")`
+  -config string        path to the config file (default: $AHOY_HOME/config.json, else ~/.ahoy/config.json)`
 
 // stringList collects a repeatable flag value (e.g. -header / -env).
 type stringList []string
@@ -42,7 +42,7 @@ func add(args []string) {
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, addUsage) }
 
 	var (
-		configPath  = fs.String("config", "config.json", "path to the gateway config file")
+		configPath  = fs.String("config", "", "path to the gateway config file")
 		name        = fs.String("name", "", "server name")
 		description = fs.String("description", "", "one-line description shown by discover()")
 		auth        = fs.String("auth", "", "http auth method: \"oauth\"")
@@ -79,7 +79,11 @@ func add(args []string) {
 	}
 	sc.Description = *description
 
-	cfg, err := loadConfig(*configPath)
+	path, err := config.ResolveForWrite(*configPath)
+	if err != nil {
+		fail(err)
+	}
+	cfg, err := loadConfig(path)
 	if err != nil {
 		fail(err)
 	}
@@ -101,7 +105,7 @@ func add(args []string) {
 		}
 	}
 
-	if err := config.Save(*configPath, cfg); err != nil {
+	if err := config.Save(path, cfg); err != nil {
 		fail(err)
 	}
 

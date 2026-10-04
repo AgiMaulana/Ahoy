@@ -18,7 +18,7 @@ func remove(args []string) {
 	fs := flag.NewFlagSet("ahoy remove", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, removeUsage) }
-	configPath := fs.String("config", "config.json", "path to the gateway config file")
+	configPath := fs.String("config", "", "path to the gateway config file")
 
 	positionals, _, err := parseArgs(fs, args)
 	if err != nil {
@@ -30,7 +30,11 @@ func remove(args []string) {
 	}
 	name := positionals[0]
 
-	cfg, err := loadConfig(*configPath)
+	path, err := config.Resolve(*configPath)
+	if err != nil {
+		fail(err)
+	}
+	cfg, err := loadConfig(path)
 	if err != nil {
 		fail(err)
 	}
@@ -39,7 +43,7 @@ func remove(args []string) {
 		fail(fmt.Errorf("unknown server %q (configured: %s)", name, joinNames(cfg)))
 	}
 	delete(cfg.Servers, key)
-	if err := config.Save(*configPath, cfg); err != nil {
+	if err := config.Save(path, cfg); err != nil {
 		fail(err)
 	}
 	fmt.Printf("removed %q\n", key)

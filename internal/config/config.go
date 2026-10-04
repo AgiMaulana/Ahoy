@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/AgiMaulana/Ahoy/internal/appdir"
 )
 
 // Transport identifies how the gateway talks to a downstream MCP server.
@@ -96,7 +99,7 @@ func (c *Config) Validate() error {
 // Save writes cfg to path atomically (temp file + rename) so a crash never
 // leaves a half-written config. The file is created with 0600 permissions
 // because a config can hold secrets such as API tokens and env values; an
-// existing file keeps its current mode.
+// existing file keeps its current mode. Missing parent directories are created.
 func Save(path string, cfg *Config) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -109,7 +112,11 @@ func Save(path string, cfg *Config) error {
 		perm = info.Mode().Perm()
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".config-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp config: %w", err)
 	}
@@ -131,4 +138,62 @@ func Save(path string, cfg *Config) error {
 		return fmt.Errorf("replace config %s: %w", path, err)
 	}
 	return nil
+}
+
+// DefaultPath is the config used when the user does not pass -config:
+// $AHOY_HOME/config.json, or ~/.ahoy/config.json when AHOY_HOME is unset.
+func DefaultPath() (string, error) {
+	base, err := appdir.Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "config.json"), nil
+}
+
+// candidates lists the config locations tried when -config is not given, in
+// priority order: the per-user config, then ./config.json for local work.
+func candidates() ([]string, error) {
+	home, err := DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	return []string{home, "config.json"}, nil
+}
+
+// Resolve returns the config to read when -config is not given. An explicit
+// path is returned as-is. Otherwise the first existing candidate wins; when
+// none exists the error lists every location that was tried.
+func Resolve(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	cands, err := candidates()
+	if err != nil {
+		return "", err
+	}
+	for _, p := range cands {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("no config found; looked in %s (create one with \"ahoy add\", or pass -config)", strings.Join(cands, ", "))
+}
+
+// ResolveForWrite returns the config to edit when -config is not given: the
+// first existing candidate, or DefaultPath when none exists yet. Creating at
+// the per-user path keeps "ahoy add" from littering the working directory.
+func ResolveForWrite(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	cands, err := candidates()
+	if err != nil {
+		return "", err
+	}
+	for _, p := range cands {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	return cands[0], nil
 }

@@ -16,6 +16,8 @@ import (
 	"sync"
 
 	"github.com/mark3labs/mcp-go/client/transport"
+
+	"github.com/AgiMaulana/Ahoy/internal/appdir"
 )
 
 // Store is a file-backed transport.TokenStore for a single server.
@@ -45,13 +47,9 @@ func NewAt(path string) *Store { return &Store{path: path} }
 
 // DefaultDir is $AHOY_HOME/tokens, or ~/.ahoy/tokens when AHOY_HOME is unset.
 func DefaultDir() (string, error) {
-	base := os.Getenv("AHOY_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		base = filepath.Join(home, ".ahoy")
+	base, err := appdir.Dir()
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(base, "tokens"), nil
 }

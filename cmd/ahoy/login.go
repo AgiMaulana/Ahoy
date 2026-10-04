@@ -28,7 +28,7 @@ Flags:
   -client-id string     pre-registered client id (skips dynamic registration)
   -client-secret string client secret for a confidential client
   -timeout duration     how long to wait for the browser (default 5m)
-  -config string        path to the config file (default "config.json")
+  -config string        path to the config file (default: $AHOY_HOME/config.json, else ~/.ahoy/config.json)
 
 The token is cached under ~/.ahoy/tokens (override with $AHOY_HOME) and reused
 by "ahoy serve" on later runs.`
@@ -39,7 +39,7 @@ func login(args []string) {
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, loginUsage) }
 
 	var (
-		configPath   = fs.String("config", "config.json", "path to the gateway config file")
+		configPath   = fs.String("config", "", "path to the gateway config file")
 		port         = fs.Int("port", 53127, "localhost callback port")
 		clientID     = fs.String("client-id", "", "pre-registered OAuth client id")
 		clientSecret = fs.String("client-secret", "", "OAuth client secret")
@@ -57,7 +57,11 @@ func login(args []string) {
 		os.Exit(2)
 	}
 
-	cfg, err := loadConfig(*configPath)
+	path, err := config.Resolve(*configPath)
+	if err != nil {
+		fail(err)
+	}
+	cfg, err := loadConfig(path)
 	if err != nil {
 		fail(err)
 	}

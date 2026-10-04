@@ -49,7 +49,7 @@ reconnects and retries the call once.
 
 ## Config
 
-JSON file (`-config`, default `config.json`):
+JSON file (`-config`, default `$AHOY_HOME/config.json`, else `~/.ahoy/config.json`):
 
 ```json
 {
@@ -84,6 +84,9 @@ JSON file (`-config`, default `config.json`):
 - `auth`: `oauth` for an HTTP server that authenticates with a browser login.
   Run `ahoy login <name>` once; the token is cached under `~/.ahoy/tokens` (or
   `$AHOY_HOME`) and reused by the gateway afterwards.
+- When `-config` is omitted, Ahoy looks for `$AHOY_HOME/config.json`, then
+  `~/.ahoy/config.json`, then `./config.json`. `ahoy add` creates the per-user
+  config when none exists, so it never writes a stray file into the cwd.
 
 ## Managing servers
 
@@ -112,7 +115,7 @@ ahoy remove github
 `add` connects to the server and prints its tool count *before* saving, so a
 broken entry is never committed. Pass `-no-verify` to save a server that is not
 reachable at add time. `-name` overrides the derived name; every command accepts
-`-config` (default `config.json`).
+`-config` (default: `$AHOY_HOME/config.json`, else `~/.ahoy/config.json`).
 
 `login` runs the standard OAuth 2.1 flow — metadata discovery, dynamic client
 registration, PKCE, and a localhost callback — then saves the token. Use
@@ -141,7 +144,8 @@ AHOY_INSTALL_DIR="$HOME/.local/bin" sh install.sh
 
 ```sh
 go build ./cmd/ahoy
-./ahoy -config config.json      # speaks MCP over stdio; logs go to stderr
+./ahoy                          # uses ~/.ahoy/config.json (or $AHOY_HOME/config.json)
+./ahoy -config config.json      # or an explicit path; speaks MCP over stdio
 ```
 
 Wire it into an MCP client (e.g. Claude Code):

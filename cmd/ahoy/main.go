@@ -75,15 +75,19 @@ func main() {
 
 func serve(args []string) {
 	fs := flag.NewFlagSet("ahoy", flag.ExitOnError)
-	configPath := fs.String("config", "config.json", "path to the gateway config file")
+	configPath := fs.String("config", "", "path to the gateway config file")
 	_ = fs.Parse(args)
 
-	cfg, err := config.Load(*configPath)
+	path, err := config.Resolve(*configPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+	cfg, err := config.Load(path)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 	if len(cfg.Servers) == 0 {
-		log.Fatalf("no servers defined in %s", *configPath)
+		log.Fatalf("no servers defined in %s", path)
 	}
 
 	gw := gateway.New(cfg)
