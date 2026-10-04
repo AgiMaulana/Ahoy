@@ -58,7 +58,7 @@ JSON file (`-config`, default `config.json`):
       "transport": "stdio",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "REPLACE_ME" }
+      "env": ["GITHUB_PERSONAL_ACCESS_TOKEN"]
     },
     "remote": {
       "description": "A streamable-HTTP MCP server",
@@ -70,10 +70,14 @@ JSON file (`-config`, default `config.json`):
 }
 ```
 
-- `transport`: `stdio` (needs `command`, optional `args`/`env`) or `http`
-  (needs `url`, optional `headers`).
+- `transport`: `stdio` (needs `command`, optional `args`/`env`/`inject`) or
+  `http` (needs `url`, optional `headers`).
 - `description` is shown by `discover()`; keep it to one line.
-- `env` is appended to the inherited environment, so `PATH` etc. still work.
+- `inject` lists secret key names the server needs. For stdio servers the
+  command is wrapped with `xenv inject KEY... -- <command>`, so the value never
+  enters this config or the gateway process. `secretFile` adds `xenv -i <file>`.
+- `env` is for non-secret variables only; it is appended to the inherited
+  environment, so `PATH` etc. still work.
 
 ## Build & run
 
@@ -104,5 +108,3 @@ end-to-end test and handy for manual experiments.
 - Semantic search (embeddings) behind the same `discover` interface — current
   matching is literal substring.
 - Reconnect on downstream process death (currently surfaces the error).
-- `xenv inject` integration so downstream credentials are supplied per-process
-  rather than read from the config.

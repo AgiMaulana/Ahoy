@@ -39,6 +39,15 @@ func main() {
 		},
 	)
 
+	s.AddTool(
+		mcp.NewTool("read_secret",
+			mcp.WithDescription("Return the value of the DEMO_SECRET environment variable."),
+		),
+		func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultText(os.Getenv("DEMO_SECRET")), nil
+		},
+	)
+
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("downstream-demo error: %v", err)
 	}

@@ -91,7 +91,8 @@ func (s *Server) connectLocked(ctx context.Context) error {
 func (s *Server) dial() (*client.Client, error) {
 	switch s.Config.Transport {
 	case config.TransportStdio:
-		return client.NewStdioMCPClient(s.Config.Command, envSlice(s.Config.Env), s.Config.Args...)
+		command, args := s.stdioCommand()
+		return client.NewStdioMCPClient(command, nil, args...)
 	case config.TransportHTTP:
 		var opts []transport.StreamableHTTPCOption
 		if len(s.Config.Headers) > 0 {
@@ -103,13 +104,25 @@ func (s *Server) dial() (*client.Client, error) {
 	}
 }
 
-func envSlice(env map[string]string) []string {
-	out := make([]string, 0, len(env))
-	for k, v := range env {
-		out = append(out, k+"="+v)
+// stdioCommand returns the command to execute for a stdio server. When env
+// keys are declared, the command is wrapped with `xenv inject` so the values
+// are resolved into the child process environment only: the gateway and its
+// config never hold the secret.
+func (s *Server) stdioCommand() (string, []string) {
+	if len(s.Config.Env) == 0 {
+		return s.Config.Command, s.Config.Args
 	}
-	sort.Strings(out)
-	return out
+
+	args := make([]string, 0, len(s.Config.Env)+len(s.Config.Args)+4)
+	if s.Config.SecretFile != "" {
+		args = append(args, "-i", s.Config.SecretFile)
+	}
+	args = append(args, "inject")
+	args = append(args, s.Config.Env...)
+	args = append(args, "--")
+	args = append(args, s.Config.Command)
+	args = append(args, s.Config.Args...)
+	return "xenv", args
 }
 
 func (s *Server) close() {

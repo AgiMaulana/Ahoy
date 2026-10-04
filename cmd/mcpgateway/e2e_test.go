@@ -99,6 +99,60 @@ func TestGatewayEndToEnd(t *testing.T) {
 	}
 }
 
+func TestGatewayInjectsSecretsViaXenv(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping end-to-end test in short mode")
+	}
+	if _, err := exec.LookPath("xenv"); err != nil {
+		t.Skip("xenv not installed")
+	}
+	t.Setenv("DEMO_SECRET", "injected-value")
+
+	root := moduleRoot(t)
+	binDir := t.TempDir()
+	build := func(pkg, name string) string {
+		out := filepath.Join(binDir, name)
+		cmd := exec.Command("go", "build", "-o", out, pkg)
+		cmd.Dir = root
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("build %s: %v\n%s", pkg, err, b)
+		}
+		return out
+	}
+
+	gwBin := build("./cmd/mcpgateway", "mcpgateway")
+	demoBin := build("./cmd/downstream-demo", "downstream-demo")
+
+	cfgPath := filepath.Join(binDir, "config.json")
+	cfg := `{"servers":{"demo":{"description":"Demo server","transport":"stdio","command":"` + demoBin + `","env":["DEMO_SECRET"]}}}`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gw, err := client.NewStdioMCPClient(gwBin, nil, "-config", cfgPath)
+	if err != nil {
+		t.Fatalf("spawn gateway: %v", err)
+	}
+	defer gw.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := gw.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	initReq := mcp.InitializeRequest{}
+	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcp.Implementation{Name: "smoke", Version: "0"}
+	if _, err := gw.Initialize(ctx, initReq); err != nil {
+		t.Fatalf("initialize gateway: %v", err)
+	}
+
+	got := callText(t, ctx, gw, "invoke", map[string]any{"server": "demo", "tool": "read_secret"})
+	if !strings.Contains(got, "injected-value") {
+		t.Fatalf("injected secret = %q, want injected-value", got)
+	}
+}
+
 func callText(t *testing.T, ctx context.Context, c *client.Client, name string, args map[string]any) string {
 	t.Helper()
 	req := mcp.CallToolRequest{}

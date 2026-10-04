@@ -22,7 +22,8 @@ type ServerConfig struct {
 	Transport   Transport         `json:"transport"`
 	Command     string            `json:"command,omitempty"`
 	Args        []string          `json:"args,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
+	Env         []string          `json:"env,omitempty"`
+	SecretFile  string            `json:"secretFile,omitempty"`
 	URL         string            `json:"url,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"`
 }
@@ -61,9 +62,15 @@ func (c *Config) validate() error {
 			if s.Command == "" {
 				return fmt.Errorf("server %q: stdio transport requires \"command\"", name)
 			}
+			if s.SecretFile != "" && len(s.Env) == 0 {
+				return fmt.Errorf("server %q: \"secretFile\" requires \"env\"", name)
+			}
 		case TransportHTTP:
 			if s.URL == "" {
 				return fmt.Errorf("server %q: http transport requires \"url\"", name)
+			}
+			if len(s.Env) > 0 || s.SecretFile != "" {
+				return fmt.Errorf("server %q: \"env\" and \"secretFile\" are only supported for stdio transport", name)
 			}
 		case "":
 			return fmt.Errorf("server %q: transport is required (stdio or http)", name)

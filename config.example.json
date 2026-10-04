@@ -5,9 +5,7 @@
       "transport": "stdio",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "REPLACE_ME"
-      }
+      "env": ["GITHUB_PERSONAL_ACCESS_TOKEN"]
     },
     "fetch": {
       "description": "Fetch a URL and convert it to markdown",
