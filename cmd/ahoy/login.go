@@ -14,6 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/client/transport"
 
 	"github.com/AgiMaulana/Ahoy/internal/config"
+	"github.com/AgiMaulana/Ahoy/internal/oauthhttp"
 	"github.com/AgiMaulana/Ahoy/internal/oauthstore"
 )
 
@@ -92,8 +93,9 @@ func login(args []string) {
 		Scopes:       scopes,
 		PKCEEnabled:  true,
 		TokenStore:   store,
+		HTTPClient:   oauthhttp.NewClient(),
 	}
-	// Reuse a client registered on a previous login.
+	// Reuse client credentials from a previous login.
 	if oauthCfg.ClientID == "" {
 		oauthCfg.ClientID, oauthCfg.ClientSecret = store.ClientCredentials()
 	}
@@ -140,6 +142,11 @@ func login(args []string) {
 	}
 	if err := handler.ProcessAuthorizationResponse(ctx, code, state, verifier); err != nil {
 		fail(err)
+	}
+	if *clientID != "" {
+		if err := store.SaveClientCredentials(handler.GetClientID(), handler.GetClientSecret()); err != nil {
+			fail(err)
+		}
 	}
 
 	fmt.Printf("authorized %q; token saved to %s\n", key, store.Path())

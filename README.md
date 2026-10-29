@@ -117,12 +117,41 @@ broken entry is never committed. Pass `-no-verify` to save a server that is not
 reachable at add time. `-name` overrides the derived name; every command accepts
 `-config` (default: `$AHOY_HOME/config.json`, else `~/.ahoy/config.json`).
 
-`login` runs the standard OAuth 2.1 flow — metadata discovery, dynamic client
-registration, PKCE, and a localhost callback — then saves the token. Use
+`login` discovers OAuth metadata, uses PKCE and a localhost callback, then saves
+the token. If path-specific protected-resource metadata returns 404, discovery
+tries the same server's root metadata before authorization-server discovery.
+Dynamic client registration is attempted when no client credentials are available. Use
 `-client-id`/`-client-secret` for a pre-registered client, `-scope` to request
-scopes, and `-port` if the default callback port is taken. A server configured
-with `auth: oauth` that has not been logged into reports
-`run "ahoy login <name>"` when the gateway starts.
+scopes, and `-port` if the default callback port is taken. Supplied client
+credentials are saved after successful authorization and reused for later
+logins and token refresh. A server configured with `auth: oauth` that has not
+been logged into reports `run "ahoy login <name>"` when the gateway starts.
+
+### Slack MCP
+
+[Slack MCP](https://docs.slack.dev/ai/slack-mcp-server/) uses
+`https://mcp.slack.com/mcp` and does **not** support dynamic client registration.
+It requires a registered Slack app's client ID and client secret, not your
+Slack password or a bot token. Internal apps and Marketplace-published apps
+can use MCP; enable the feature in the app's **Agents** settings and request
+only the user scopes needed by your tools.
+
+For an app that permits Ahoy's callback, provide the app credentials from your
+environment:
+
+```sh
+ahoy login slack-for-work-personal-account \
+  -client-id "$SLACK_CLIENT_ID" \
+  -client-secret "$SLACK_CLIENT_SECRET" \
+  -scope channels:read
+```
+
+Ahoy's callback is `http://127.0.0.1:53127/callback` (`-port` changes the port).
+[Slack's OAuth documentation](https://docs.slack.dev/authentication/installing-with-oauth/)
+requires HTTPS redirect URLs. Ahoy currently has no HTTPS redirect override;
+if your app cannot register the loopback callback, obtain a user token through
+the app's own OAuth flow and configure it as an HTTP `Authorization: Bearer`
+header instead. Static header tokens are not refreshed by Ahoy.
 
 ## Install
 

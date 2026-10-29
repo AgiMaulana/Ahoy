@@ -1,5 +1,5 @@
 // Package oauthstore persists OAuth state for HTTP MCP servers: the access and
-// refresh tokens, plus the client credentials from dynamic registration. State
+// refresh tokens, plus registered or supplied OAuth client credentials. State
 // lives in one JSON file per server so "ahoy login" records it and "ahoy serve"
 // reuses it on the next run.
 package oauthstore
@@ -89,7 +89,7 @@ func (s *Store) SaveToken(ctx context.Context, token *transport.Token) error {
 	return s.write(d)
 }
 
-// ClientCredentials returns the registered client id and secret, if any.
+// ClientCredentials returns the saved client id and secret, if any.
 func (s *Store) ClientCredentials() (id, secret string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -100,7 +100,7 @@ func (s *Store) ClientCredentials() (id, secret string) {
 	return d.ClientID, d.ClientSecret
 }
 
-// SaveClientCredentials records the result of dynamic client registration.
+// SaveClientCredentials records credentials for later logins and token refresh.
 func (s *Store) SaveClientCredentials(id, secret string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

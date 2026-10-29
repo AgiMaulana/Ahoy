@@ -19,6 +19,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/AgiMaulana/Ahoy/internal/config"
+	"github.com/AgiMaulana/Ahoy/internal/oauthhttp"
 	"github.com/AgiMaulana/Ahoy/internal/oauthstore"
 )
 
@@ -114,6 +115,7 @@ func (s *Server) dial() (*client.Client, error) {
 				ClientSecret: secret,
 				PKCEEnabled:  true,
 				TokenStore:   store,
+				HTTPClient:   oauthhttp.NewClient(),
 			}))
 		}
 		return client.NewStreamableHttpClient(s.Config.URL, opts...)
