@@ -12,12 +12,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/mark3labs/mcp-go/client/transport"
 
 	"github.com/AgiMaulana/Ahoy/internal/oauthstore"
 )
@@ -189,6 +192,13 @@ func main() {
 						http.NotFound(w, r)
 						return
 					}
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode registration body: %v", err)
+					}
+					if scope, ok := body["scope"]; ok {
+						t.Errorf("registration sent scope %v; want the field omitted when no scopes are requested", scope)
+					}
 					w.WriteHeader(http.StatusCreated)
 					json.NewEncoder(w).Encode(map[string]string{
 						"client_id": clientID, "client_secret": clientSecret,
@@ -287,8 +297,17 @@ func main() {
 				assertSaved()
 				flags = nil
 			}
-			if authorizations.Load() != 2 || exchanges.Load() != 2 || rootDiscoveries.Load() != 2 {
-				t.Fatal("both logins must discover root metadata and complete an authorization code exchange")
+			if authorizations.Load() != 2 || exchanges.Load() != 2 {
+				t.Fatal("both logins must complete an authorization code exchange")
+			}
+			// A dynamic login discovers metadata once to register and once for
+			// authorization; the second login reuses the stored credentials.
+			wantRootDiscoveries := int32(2)
+			if !preregistered {
+				wantRootDiscoveries = 3
+			}
+			if got := rootDiscoveries.Load(); got != wantRootDiscoveries {
+				t.Fatalf("root metadata discoveries = %d, want %d", got, wantRootDiscoveries)
 			}
 			wantRegistrations := int32(1)
 			if preregistered {
@@ -297,7 +316,6 @@ func main() {
 			if got := registrations.Load(); got != wantRegistrations {
 				t.Fatalf("registration requests = %d, want %d", got, wantRegistrations)
 			}
-
 			before, err := os.ReadFile(store.Path())
 			if err != nil {
 				t.Fatal(err)
@@ -323,6 +341,87 @@ func main() {
 				if !bytes.Equal(before, after) {
 					t.Fatalf("login with %s replaced working OAuth state", failure.clientID)
 				}
+			}
+		})
+	}
+}
+
+func TestLoginScopes(t *testing.T) {
+	configured := []string{"agent:search", "agent:content:read"}
+	if got := loginScopes(nil, configured); !reflect.DeepEqual(got, configured) {
+		t.Errorf("loginScopes(nil, configured) = %v, want %v", got, configured)
+	}
+	flags := []string{"channels:read"}
+	if got := loginScopes(flags, configured); !reflect.DeepEqual(got, flags) {
+		t.Errorf("loginScopes(flags, configured) = %v, want the flags %v", got, flags)
+	}
+}
+
+func TestRegisterClientScope(t *testing.T) {
+	cases := []struct {
+		name       string
+		scopes     []string
+		wantScope  string
+		wantAbsent bool
+	}{
+		{"no scopes omits the field", nil, "", true},
+		{"configured scopes are sent", []string{"agent:search", "agent:content:read"}, "agent:search agent:content:read", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bodies := make(chan map[string]any, 1)
+			var srv *httptest.Server
+			srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/meta":
+					json.NewEncoder(w).Encode(map[string]any{
+						"issuer":                 srv.URL,
+						"authorization_endpoint": srv.URL + "/authorize",
+						"token_endpoint":         srv.URL + "/token",
+						"registration_endpoint":  srv.URL + "/register",
+					})
+				case "/register":
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode registration body: %v", err)
+					}
+					bodies <- body
+					w.WriteHeader(http.StatusCreated)
+					json.NewEncoder(w).Encode(map[string]string{
+						"client_id": "registered-id", "client_secret": "registered-secret",
+					})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			cfg := transport.OAuthConfig{
+				RedirectURI:           "http://127.0.0.1:53127/callback",
+				Scopes:                tc.scopes,
+				AuthServerMetadataURL: srv.URL + "/meta",
+				HTTPClient:            srv.Client(),
+			}
+			handler := transport.NewOAuthHandler(cfg)
+			id, secret, err := registerClient(context.Background(), handler, cfg, "Ahoy")
+			if err != nil {
+				t.Fatalf("registerClient: %v", err)
+			}
+			if id != "registered-id" || secret != "registered-secret" {
+				t.Errorf("credentials = %q/%q, want registered-id/registered-secret", id, secret)
+			}
+
+			body := <-bodies
+			scope, ok := body["scope"]
+			if tc.wantAbsent {
+				if ok {
+					t.Errorf("registration scope = %v, want the field omitted", scope)
+				}
+				return
+			}
+			if !ok || scope != tc.wantScope {
+				t.Errorf("registration scope = %v (present %v), want %q", scope, ok, tc.wantScope)
 			}
 		})
 	}

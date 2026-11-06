@@ -73,7 +73,7 @@ func TestParseArgs(t *testing.T) {
 }
 
 func TestBuildServerStdio(t *testing.T) {
-	sc, name, err := buildServer("github", "", []string{"npx", "-y", "@modelcontextprotocol/server-github"}, nil, []string{"TOKEN=x"}, "")
+	sc, name, err := buildServer("github", "", []string{"npx", "-y", "@modelcontextprotocol/server-github"}, nil, []string{"TOKEN=x"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestBuildServerStdio(t *testing.T) {
 
 func TestBuildServerStdioNameFlag(t *testing.T) {
 	// No positional name: -name supplies it.
-	sc, name, err := buildServer("", "my-server", []string{"uvx", "mcp-server-fetch"}, nil, nil, "")
+	sc, name, err := buildServer("", "my-server", []string{"uvx", "mcp-server-fetch"}, nil, nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestBuildServerStdioNameFlag(t *testing.T) {
 }
 
 func TestBuildServerHTTP(t *testing.T) {
-	sc, name, err := buildServer("https://mcp.sentry.dev/mcp", "", nil, []string{"Authorization: Bearer z"}, nil, "")
+	sc, name, err := buildServer("https://mcp.sentry.dev/mcp", "", nil, []string{"Authorization: Bearer z"}, nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestBuildServerHTTP(t *testing.T) {
 }
 
 func TestBuildServerNameOverride(t *testing.T) {
-	_, name, err := buildServer("https://mcp.sentry.dev/mcp", "My Sentry", nil, nil, nil, "")
+	_, name, err := buildServer("https://mcp.sentry.dev/mcp", "My Sentry", nil, nil, nil, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,12 +129,15 @@ func TestBuildServerNameOverride(t *testing.T) {
 }
 
 func TestBuildServerOAuth(t *testing.T) {
-	sc, _, err := buildServer("https://mcp.sentry.dev/mcp", "", nil, nil, nil, "oauth")
+	sc, _, err := buildServer("https://mcp.sentry.dev/mcp", "", nil, nil, nil, []string{"channels:read"}, "oauth")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sc.Auth != config.AuthOAuth {
 		t.Errorf("auth = %q, want oauth", sc.Auth)
+	}
+	if !reflect.DeepEqual(sc.Scopes, []string{"channels:read"}) {
+		t.Errorf("scopes = %v", sc.Scopes)
 	}
 }
 
@@ -145,18 +148,21 @@ func TestBuildServerErrors(t *testing.T) {
 		cmd     []string
 		headers []string
 		env     []string
+		scopes  []string
 		auth    string
 	}{
-		{"bare name without command", "github", nil, nil, nil, ""},
-		{"url with stdio command", "https://x.dev/mcp", []string{"npx"}, nil, nil, ""},
-		{"header on stdio", "github", []string{"npx"}, []string{"A: b"}, nil, ""},
-		{"env on http", "https://x.dev/mcp", nil, nil, []string{"A=b"}, ""},
-		{"auth on stdio", "github", []string{"npx"}, nil, nil, "oauth"},
-		{"stdio without a name", "", []string{"npx"}, nil, nil, ""},
-		{"bad env", "github", []string{"npx"}, nil, []string{"noequals"}, ""},
+		{"bare name without command", "github", nil, nil, nil, nil, ""},
+		{"url with stdio command", "https://x.dev/mcp", []string{"npx"}, nil, nil, nil, ""},
+		{"header on stdio", "github", []string{"npx"}, []string{"A: b"}, nil, nil, ""},
+		{"env on http", "https://x.dev/mcp", nil, nil, []string{"A=b"}, nil, ""},
+		{"scope on stdio", "github", []string{"npx"}, nil, nil, []string{"read"}, ""},
+		{"scope without oauth", "https://x.dev/mcp", nil, nil, nil, []string{"read"}, ""},
+		{"auth on stdio", "github", []string{"npx"}, nil, nil, nil, "oauth"},
+		{"stdio without a name", "", []string{"npx"}, nil, nil, nil, ""},
+		{"bad env", "github", []string{"npx"}, nil, []string{"noequals"}, nil, ""},
 	}
 	for _, tc := range cases {
-		if _, _, err := buildServer(tc.target, "", tc.cmd, tc.headers, tc.env, tc.auth); err == nil {
+		if _, _, err := buildServer(tc.target, "", tc.cmd, tc.headers, tc.env, tc.scopes, tc.auth); err == nil {
 			t.Errorf("%s: expected an error", tc.name)
 		}
 	}

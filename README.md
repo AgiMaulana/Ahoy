@@ -71,7 +71,8 @@ JSON file (`-config`, default `$AHOY_HOME/config.json`, else `~/.ahoy/config.jso
       "description": "Sentry issues and projects (browser OAuth login)",
       "transport": "http",
       "url": "https://mcp.sentry.dev/mcp",
-      "auth": "oauth"
+      "auth": "oauth",
+      "scopes": ["org:read", "project:read"]
     }
   }
 }
@@ -84,6 +85,10 @@ JSON file (`-config`, default `$AHOY_HOME/config.json`, else `~/.ahoy/config.jso
 - `auth`: `oauth` for an HTTP server that authenticates with a browser login.
   Run `ahoy login <name>` once; the token is cached under `~/.ahoy/tokens` (or
   `$AHOY_HOME`) and reused by the gateway afterwards.
+- `scopes`: OAuth scopes requested at login (requires `auth: oauth`). A `-scope`
+  flag passed to `ahoy login` overrides this list. When neither is set, the
+  optional `scope` field is omitted from dynamic client registration rather than
+  sent empty, which strict authorization servers reject.
 - When `-config` is omitted, Ahoy looks for `$AHOY_HOME/config.json`, then
   `~/.ahoy/config.json`, then `./config.json`. `ahoy add` creates the per-user
   config when none exists, so it never writes a stray file into the cwd.
@@ -102,6 +107,9 @@ ahoy add https://mcp.sentry.dev/mcp -header "Authorization: Bearer $TOKEN"
 # ...or with a browser OAuth login (run this once to authorize)
 ahoy add https://mcp.sentry.dev/mcp -auth oauth
 ahoy login sentry
+
+# ...and persist the scopes requested on every login
+ahoy add https://mcp.sentry.dev/mcp -auth oauth -scope org:read -scope project:read
 
 # stdio — NAME -- <command> [args]
 ahoy add github -- npx -y @modelcontextprotocol/server-github
@@ -122,10 +130,11 @@ the token. If path-specific protected-resource metadata returns 404, discovery
 tries the same server's root metadata before authorization-server discovery.
 Dynamic client registration is attempted when no client credentials are available. Use
 `-client-id`/`-client-secret` for a pre-registered client, `-scope` to request
-scopes, and `-port` if the default callback port is taken. Supplied client
-credentials are saved after successful authorization and reused for later
-logins and token refresh. A server configured with `auth: oauth` that has not
-been logged into reports `run "ahoy login <name>"` when the gateway starts.
+scopes (or set `scopes` on the server in `config.json`), and `-port` if the
+default callback port is taken. Supplied client credentials are saved after
+successful authorization and reused for later logins and token refresh. A server
+configured with `auth: oauth` that has not been logged into reports
+`run "ahoy login <name>"` when the gateway starts.
 
 ### Slack MCP
 

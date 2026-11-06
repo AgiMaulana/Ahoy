@@ -39,6 +39,7 @@ type ServerConfig struct {
 	URL         string            `json:"url,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"`
 	Auth        AuthType          `json:"auth,omitempty"`
+	Scopes      []string          `json:"scopes,omitempty"`
 }
 
 // Config is the top-level gateway configuration.
@@ -77,6 +78,9 @@ func (c *Config) Validate() error {
 			if s.Auth != AuthOAuth {
 				return fmt.Errorf("server %q: unsupported auth %q (only %q)", name, s.Auth, AuthOAuth)
 			}
+		}
+		if len(s.Scopes) > 0 && s.Auth != AuthOAuth {
+			return fmt.Errorf("server %q: scopes require \"auth\": \"oauth\"", name)
 		}
 		switch s.Transport {
 		case TransportStdio:
