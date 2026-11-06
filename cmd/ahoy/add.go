@@ -24,6 +24,7 @@ Flags:
   -name string          server name (default: derived from the URL)
   -description string   one-line description shown by discover()
   -auth string          http auth method: "oauth" (browser login via ahoy login)
+  -scope string         OAuth scope, repeatable (requires -auth oauth)
   -header KEY:VALUE     HTTP header, repeatable (http only)
   -env KEY=VALUE        environment variable, repeatable (stdio only)
   -force                overwrite an existing server with the same name
@@ -49,9 +50,10 @@ func add(args []string) {
 		force       = fs.Bool("force", false, "overwrite an existing server")
 		noVerify    = fs.Bool("no-verify", false, "save without checking the connection")
 	)
-	var headers, env stringList
+	var headers, env, scopes stringList
 	fs.Var(&headers, "header", "HTTP header KEY:VALUE (repeatable)")
 	fs.Var(&env, "env", "environment variable KEY=VALUE (repeatable)")
+	fs.Var(&scopes, "scope", "OAuth scope (repeatable, requires -auth oauth)")
 
 	positionals, command, err := parseArgs(fs, args)
 	if err != nil {
@@ -73,7 +75,7 @@ func add(args []string) {
 	if len(positionals) == 1 {
 		target = positionals[0]
 	}
-	sc, serverName, err := buildServer(target, *name, command, headers, env, *auth)
+	sc, serverName, err := buildServer(target, *name, command, headers, env, scopes, *auth)
 	if err != nil {
 		fail(err)
 	}
@@ -122,7 +124,7 @@ func add(args []string) {
 
 // buildServer turns parsed arguments into a server config and its final name.
 // A non-empty command means stdio; otherwise target must be an http(s) URL.
-func buildServer(target, name string, command []string, headers, env []string, auth string) (config.ServerConfig, string, error) {
+func buildServer(target, name string, command []string, headers, env, scopes []string, auth string) (config.ServerConfig, string, error) {
 	if len(command) > 0 {
 		if isURL(target) {
 			return config.ServerConfig{}, "", fmt.Errorf("a stdio server takes a NAME then -- <command>, not a URL")
@@ -132,6 +134,9 @@ func buildServer(target, name string, command []string, headers, env []string, a
 		}
 		if auth != "" {
 			return config.ServerConfig{}, "", fmt.Errorf("-auth applies to http servers; use -env for stdio")
+		}
+		if len(scopes) > 0 {
+			return config.ServerConfig{}, "", fmt.Errorf("-scope applies to oauth http servers; stdio servers have no OAuth scopes")
 		}
 		final := name
 		if final == "" {
@@ -158,6 +163,9 @@ func buildServer(target, name string, command []string, headers, env []string, a
 	if len(env) > 0 {
 		return config.ServerConfig{}, "", fmt.Errorf("-env applies to stdio servers; use -header for http")
 	}
+	if len(scopes) > 0 && auth != string(config.AuthOAuth) {
+		return config.ServerConfig{}, "", fmt.Errorf("-scope requires -auth oauth")
+	}
 	h, err := keyValues(headers, ":")
 	if err != nil {
 		return config.ServerConfig{}, "", fmt.Errorf("-header: %w", err)
@@ -170,6 +178,7 @@ func buildServer(target, name string, command []string, headers, env []string, a
 		URL:       target,
 		Headers:   h,
 		Auth:      config.AuthType(auth),
+		Scopes:    scopes,
 	}, sanitizeName(name), nil
 }
 

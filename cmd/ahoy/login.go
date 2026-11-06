@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/client/transport"
@@ -25,7 +29,7 @@ Usage:
 
 Flags:
   -port int             localhost callback port (default 53127)
-  -scope string         OAuth scope, repeatable
+  -scope string         OAuth scope, repeatable (default: the server's "scopes")
   -client-id string     pre-registered client id (skips dynamic registration)
   -client-secret string client secret for a confidential client
   -timeout duration     how long to wait for the browser (default 5m)
@@ -90,7 +94,7 @@ func login(args []string) {
 		ClientID:     *clientID,
 		ClientSecret: *clientSecret,
 		RedirectURI:  fmt.Sprintf("http://127.0.0.1:%d/callback", *port),
-		Scopes:       scopes,
+		Scopes:       loginScopes(scopes, sc.Scopes),
 		PKCEEnabled:  true,
 		TokenStore:   store,
 		HTTPClient:   oauthhttp.NewClient(),
@@ -100,18 +104,22 @@ func login(args []string) {
 		oauthCfg.ClientID, oauthCfg.ClientSecret = store.ClientCredentials()
 	}
 
-	handler := transport.NewOAuthHandler(oauthCfg)
-	handler.SetBaseURL(sc.URL)
-
 	if oauthCfg.ClientID == "" {
 		fmt.Fprintln(os.Stderr, "registering OAuth client...")
-		if err := handler.RegisterClient(ctx, "Ahoy"); err != nil {
+		discovery := transport.NewOAuthHandler(oauthCfg)
+		discovery.SetBaseURL(sc.URL)
+		id, secret, err := registerClient(ctx, discovery, oauthCfg, "Ahoy")
+		if err != nil {
 			fail(fmt.Errorf("dynamic client registration failed: %w\n\nPass -client-id (and -client-secret) to use a pre-registered client", err))
 		}
-		if err := store.SaveClientCredentials(handler.GetClientID(), handler.GetClientSecret()); err != nil {
+		if err := store.SaveClientCredentials(id, secret); err != nil {
 			fail(err)
 		}
+		oauthCfg.ClientID, oauthCfg.ClientSecret = id, secret
 	}
+
+	handler := transport.NewOAuthHandler(oauthCfg)
+	handler.SetBaseURL(sc.URL)
 
 	state, err := transport.GenerateState()
 	if err != nil {
@@ -150,6 +158,98 @@ func login(args []string) {
 	}
 
 	fmt.Printf("authorized %q; token saved to %s\n", key, store.Path())
+}
+
+// loginScopes chooses the scopes to request: explicit -scope flags override the
+// server's configured scopes.
+func loginScopes(flags, configured []string) []string {
+	if len(flags) > 0 {
+		return flags
+	}
+	return configured
+}
+
+// clientRegistrationRequest is an RFC 7591 dynamic client registration body.
+// Scope is omitted when empty: RFC 7591 marks it OPTIONAL, and strict
+// authorization servers reject `"scope": ""` with invalid_client_metadata.
+type clientRegistrationRequest struct {
+	ClientName              string   `json:"client_name"`
+	RedirectURIs            []string `json:"redirect_uris"`
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+	GrantTypes              []string `json:"grant_types"`
+	ResponseTypes           []string `json:"response_types"`
+	Scope                   string   `json:"scope,omitempty"`
+	ClientURI               string   `json:"client_uri,omitempty"`
+}
+
+type clientRegistrationResponse struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+}
+
+// registerClient performs RFC 7591 dynamic client registration. It replaces
+// mcp-go's OAuthHandler.RegisterClient, which always serializes "scope" (even
+// as an empty string) and is rejected by spec-strict authorization servers.
+func registerClient(ctx context.Context, handler *transport.OAuthHandler, cfg transport.OAuthConfig, clientName string) (clientID, clientSecret string, err error) {
+	metadata, err := handler.GetServerMetadata(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get server metadata: %w", err)
+	}
+	if metadata.RegistrationEndpoint == "" {
+		return "", "", fmt.Errorf("server does not support dynamic client registration")
+	}
+
+	reg := clientRegistrationRequest{
+		ClientName:              clientName,
+		RedirectURIs:            []string{cfg.RedirectURI},
+		TokenEndpointAuthMethod: "none", // public client
+		GrantTypes:              []string{"authorization_code", "refresh_token"},
+		ResponseTypes:           []string{"code"},
+		Scope:                   strings.Join(cfg.Scopes, " "),
+		ClientURI:               cfg.ClientURI,
+	}
+	if cfg.ClientSecret != "" {
+		reg.TokenEndpointAuthMethod = "client_secret_post"
+	}
+
+	body, err := json.Marshal(reg)
+	if err != nil {
+		return "", "", fmt.Errorf("encode registration request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, metadata.RegistrationEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", "", fmt.Errorf("create registration request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("send registration request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		var oauthErr transport.OAuthError
+		if json.Unmarshal(respBody, &oauthErr) == nil && oauthErr.ErrorCode != "" {
+			return "", "", fmt.Errorf("registration request failed: %w", oauthErr)
+		}
+		return "", "", fmt.Errorf("registration request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var regResp clientRegistrationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&regResp); err != nil {
+		return "", "", fmt.Errorf("decode registration response: %w", err)
+	}
+	if regResp.ClientID == "" {
+		return "", "", fmt.Errorf("registration response did not include a client_id")
+	}
+	return regResp.ClientID, regResp.ClientSecret, nil
 }
 
 // waitForCallback serves a single OAuth redirect on ln and returns the code.

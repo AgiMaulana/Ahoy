@@ -113,6 +113,7 @@ func (s *Server) dial() (*client.Client, error) {
 			opts = append(opts, transport.WithHTTPOAuth(transport.OAuthConfig{
 				ClientID:     id,
 				ClientSecret: secret,
+				Scopes:       s.Config.Scopes,
 				PKCEEnabled:  true,
 				TokenStore:   store,
 				HTTPClient:   oauthhttp.NewClient(),

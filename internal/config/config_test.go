@@ -13,6 +13,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			Transport: TransportHTTP,
 			URL:       "https://mcp.sentry.dev/mcp",
 			Headers:   map[string]string{"Authorization": "Bearer x"},
+			Auth:      AuthOAuth,
+			Scopes:    []string{"org:read"},
 		},
 		"local": {
 			Description: "demo",
@@ -38,6 +40,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if got.Servers["remote"].Headers["Authorization"] != "Bearer x" {
 		t.Errorf("remote header not preserved: %+v", got.Servers["remote"])
+	}
+	if scopes := got.Servers["remote"].Scopes; len(scopes) != 1 || scopes[0] != "org:read" {
+		t.Errorf("remote scopes not preserved: %+v", got.Servers["remote"])
 	}
 	local := got.Servers["local"]
 	if local.Command != "npx" || len(local.Args) != 2 || local.Env["K"] != "V" {
@@ -87,6 +92,9 @@ func TestValidate(t *testing.T) {
 		{"stdio missing command", map[string]ServerConfig{"s": {Transport: TransportStdio}}, true},
 		{"http ok", map[string]ServerConfig{"s": {Transport: TransportHTTP, URL: "u"}}, false},
 		{"oauth ok", map[string]ServerConfig{"s": {Transport: TransportHTTP, URL: "u", Auth: AuthOAuth}}, false},
+		{"oauth scopes ok", map[string]ServerConfig{"s": {Transport: TransportHTTP, URL: "u", Auth: AuthOAuth, Scopes: []string{"read"}}}, false},
+		{"scopes without oauth", map[string]ServerConfig{"s": {Transport: TransportHTTP, URL: "u", Scopes: []string{"read"}}}, true},
+		{"scopes on stdio", map[string]ServerConfig{"s": {Transport: TransportStdio, Command: "x", Scopes: []string{"read"}}}, true},
 		{"http missing url", map[string]ServerConfig{"s": {Transport: TransportHTTP}}, true},
 		{"auth on stdio", map[string]ServerConfig{"s": {Transport: TransportStdio, Command: "x", Auth: AuthOAuth}}, true},
 		{"unsupported auth", map[string]ServerConfig{"s": {Transport: TransportHTTP, URL: "u", Auth: "basic"}}, true},
