@@ -9,12 +9,16 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/AgiMaulana/Ahoy/internal/config"
 	"github.com/AgiMaulana/Ahoy/internal/gateway"
+	"github.com/AgiMaulana/Ahoy/internal/hooks"
 	"github.com/AgiMaulana/Ahoy/internal/mcpserver"
 )
 
@@ -39,6 +43,13 @@ Use "ahoy add -h", "ahoy login -h", "ahoy list -h", "ahoy remove -h" or "ahoy up
 func main() {
 	log.SetOutput(os.Stderr) // stdout is reserved for the MCP stdio channel.
 	log.SetPrefix("ahoy: ")
+
+	// MCP clients may close our stderr pipe before the graceful shutdown
+	// finishes; a plain SIGPIPE there would kill Ahoy mid-exit and lose the
+	// shutdown hooks. With SIGPIPE ignored, writes to the dead pipe return
+	// EPIPE instead, which the log package drops silently. Note: ignored
+	// dispositions are inherited by downstream child processes.
+	signal.Ignore(syscall.SIGPIPE)
 
 	args := os.Args[1:]
 	if len(args) > 0 {
@@ -94,9 +105,23 @@ func serve(args []string) {
 		log.Fatalf("no servers defined in %s", path)
 	}
 
+	hookFile, err := hooks.Load(hooks.BootFile(path))
+	if err != nil {
+		log.Fatalf("failed to load lifecycle hooks: %v", err)
+	}
+
+	configDir := filepath.Dir(path)
+	hooks.RunBoot(context.Background(), configDir, hookFile)
+
 	gw := gateway.New(cfg)
 	gw.ConnectAll(context.Background())
-	defer gw.Close()
+	// Shutdown hooks must run after the downstream connections close and on
+	// every serve exit, so the error from ServeStdio is logged instead of
+	// passed to log.Fatalf (which exits without running deferred functions).
+	defer func() {
+		gw.Close()
+		hooks.RunShutdown(context.Background(), configDir, hookFile)
+	}()
 
 	for _, s := range gw.Servers() {
 		if err := s.Err(); err != nil {
@@ -107,6 +132,6 @@ func serve(args []string) {
 	}
 
 	if err := server.ServeStdio(mcpserver.New(gw)); err != nil {
-		log.Fatalf("gateway server error: %v", err)
+		log.Printf("gateway server error: %v", err)
 	}
 }

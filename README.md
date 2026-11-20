@@ -93,6 +93,65 @@ JSON file (`-config`, default `$AHOY_HOME/config.json`, else `~/.ahoy/config.jso
   `~/.ahoy/config.json`, then `./config.json`. `ahoy add` creates the per-user
   config when none exists, so it never writes a stray file into the cwd.
 
+## Lifecycle hooks
+
+MCP servers reached over streamable HTTP on localhost must already be running
+before the gateway connects. Lifecycle hooks let Ahoy boot that environment on
+startup and tear it down on exit, without touching `config.json`:
+
+```
+~/.ahoy/
+├── config.json          # server connections only (unchanged)
+└── hooks/
+    └── hooks.json       # lifecycle hooks (optional)
+```
+
+```json
+{
+  "events": {
+    "Boot": [
+      { "type": "command",
+        "command": "docker compose -f ~/src/api/docker-compose.yml up -d",
+        "statusMessage": "start infra" },
+      { "type": "command", "command": "uvx my-localhost-server --port 8080", "timeout": 60 }
+    ],
+    "Shutdown": [
+      { "type": "command", "command": "pkill -f 'my-localhost-server'", "timeout": 10 }
+    ]
+  }
+}
+```
+
+- Hooks are plain shell commands run via `sh -c` (`cmd /C` on Windows), so
+  chaining, pipes and pointing `command` at a `.sh` script (its shebang picks
+  the interpreter) all work.
+- `Boot` runs sequentially, in array order, before Ahoy connects to any
+  server. `Shutdown` runs in reverse order after Ahoy closes its connections.
+  Both files are optional; a missing hooks file means no hooks.
+- `timeout` is per hook, in seconds (default 30 for Boot, 10 for Shutdown). A
+  hook that exceeds it is killed, the failure is logged, and the remaining
+  hooks still run — one broken command never prevents Ahoy from serving.
+- `statusMessage` (optional) replaces the command in Ahoy's log line.
+- Hooks run with the directory containing `config.json` as their working
+  directory and inherit Ahoy's environment. The per-server `env` maps in
+  `config.json` do not apply to hooks; put exports in the command or a script.
+
+Contracts for reliable behavior:
+
+- **Boot hooks should be idempotent.** They run on every Ahoy start (each agent
+  session spawns a fresh gateway), and ideally block until the port accepts
+  connections. If a boot command returns before the server is ready, that
+  server is listed as unavailable and retried on first use.
+- **Shutdown hooks must be safe when nothing is running** (e.g. `pkill` with no
+  match exits nonzero — that is fine, it is only logged). They run
+  unconditionally, including when the booted server was already up before this
+  session, because hooks are not tied to individual servers. Prefer
+  `pkill -f ... || true` style guards.
+- **Use absolute paths or an explicit `cd`** — an agent harness may spawn Ahoy
+  from any working directory.
+- Ahoy exits gracefully when its client closes the stdio channel. If the
+  harness kills Ahoy outright (SIGKILL), shutdown hooks cannot run.
+
 ## Managing servers
 
 The same config can be edited from the terminal:

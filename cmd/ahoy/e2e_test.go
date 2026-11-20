@@ -147,6 +147,77 @@ func TestGatewayReconnectsAfterDownstreamDeath(t *testing.T) {
 	}
 }
 
+func TestGatewayLifecycleHooks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping end-to-end test in short mode")
+	}
+
+	root := moduleRoot(t)
+	binDir := t.TempDir()
+	demoBin := buildBinary(t, root, binDir, "./cmd/downstream-demo", "downstream-demo")
+
+	// Hooks resolve to <dir-of-config>/hooks/hooks.json. The commands use
+	// relative paths on purpose: they must run with the config directory as
+	// their working directory. The boot hook also chains and pipes to prove
+	// shell semantics reach the hook.
+	hooksJSON := `{
+		"events": {
+			"Boot": [
+				{"type": "command", "command": "echo hello | tr a-z A-Z > boot.marker",
+				 "statusMessage": "boot marker"},
+				{"type": "command", "command": "echo second >> boot.marker"}
+			],
+			"Shutdown": [
+				{"type": "command", "command": "echo bye > shutdown.marker"}
+			]
+		}
+	}`
+	if err := os.MkdirAll(filepath.Join(binDir, "hooks"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "hooks", "hooks.json"), []byte(hooksJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gw := startGateway(t, root, binDir, demoConfig(demoBin))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// startGateway completed MCP initialize, which happens after ConnectAll,
+	// so the boot hooks must have run by now — in order, in the config dir.
+	data, err := os.ReadFile(filepath.Join(binDir, "boot.marker"))
+	if err != nil {
+		t.Fatalf("boot hook did not create boot.marker: %v", err)
+	}
+	if got, want := strings.Fields(string(data)), []string{"HELLO", "second"}; strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("boot.marker = %v, want %v (ordered)", got, want)
+	}
+
+	if got := callText(t, ctx, gw, "invoke", map[string]any{
+		"server":    "demo",
+		"tool":      "add",
+		"arguments": map[string]any{"a": 1, "b": 2},
+	}); !strings.Contains(got, "3") {
+		t.Fatalf("invoke(add, 1, 2) = %q, want 3 — gateway must serve normally after boot hooks", got)
+	}
+
+	// Closing the client closes the gateway's stdin, which ends ServeStdio and
+	// must run the shutdown hooks before the process exits.
+	_ = gw.Close()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(binDir, "shutdown.marker")); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("shutdown hook did not create shutdown.marker after gateway exit")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func callText(t *testing.T, ctx context.Context, c *client.Client, name string, args map[string]any) string {
 	t.Helper()
 	req := mcp.CallToolRequest{}
